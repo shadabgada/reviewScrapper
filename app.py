@@ -1,9 +1,8 @@
-from flask import Flask, render_template, url_for, request, redirect
-from flask_cors import CORS, cross_origin
+from flask import Flask, request, jsonify
+from flask_cors import cross_origin
 import requests
 from bs4 import BeautifulSoup as bs
 from urllib.request import urlopen as uReq
-import pymongo
 
 app = Flask(__name__)
 
@@ -12,88 +11,140 @@ app = Flask(__name__)
 # To get requirement.txt file
 # pip freeze > requirements.txt
 
-@app.route('/', methods=['POST', 'GET'])
-@cross_origin()  # It allows requests comes from different machine all over the world. cloud block those requests.
-def index():
-    if request.method == 'POST':
+def get_reviews_by_page(reviews_link, html_parser, search_string):
+    print(reviews_link)
+    reviews_res = requests.get(reviews_link)
+    reviews_res.encoding = 'utf-8'
+    reviews_html = bs(reviews_res.text, html_parser)
+
+    review_list = reviews_html.findAll("div", {"class": "_1AtVbE col-12-12"})
+
+    del review_list[0:4]
+
+    del review_list[len(review_list)-1]
+
+    reviews = []
+    for review in review_list:
         try:
-            searchString = request.form['content'].replace(" ", "")
-#            searchString = request.args.get('input')
-            print(searchString)
-            flipkart_url = "https://www.flipkart.com/search?q=" + searchString
-            uClient = uReq(flipkart_url)
-            flipkartPage = uClient.read()
-            uClient.close()
-            flipkart_html = bs(flipkartPage, "html.parser")
-            bigboxes = flipkart_html.findAll("div", {"class": "_1AtVbE col-12-12"})
-            del bigboxes[0:3]
-            box = bigboxes[0]
-            productLink = "https://www.flipkart.com" + box.div.div.div.a['href']
-            print("productLink",productLink)
-            prodRes = requests.get(productLink)
-            prodRes.encoding = 'utf-8'
-            prod_html = bs(prodRes.text, "html.parser")
-            # print(prod_html)
-            reviewPage = prod_html.findAll("div", {"class": "col JOpGWq"})
+            # name.encode(encoding='utf-8')
+            name = review.div.div.div.find_all('div', {"class": "row _3n8db9"})[0].div.p.text
+        except (TypeError, AttributeError):
+            name = 'No Name'
 
-            filename = searchString + ".csv"
-            fw = open(filename, "w")
-            headers = "Product, Customer Name, Rating, Heading, Comment \n"
-            fw.write(headers)
-            reviews = []
+        try:
+            # rating.encode(encoding='utf-8')
+            rating = review.div.div.div.div.div.text
+        except (TypeError, AttributeError):
+            rating = 'No Rating'
 
-            reviewsLink = "https://www.flipkart.com" + reviewPage[0].a['href'].split("&")[0]
+        try:
+            # commentHead.encode(encoding='utf-8')
+            comment_head = review.div.div.div.div.p.text
+        except (TypeError, AttributeError):
+            comment_head = 'No Comment Heading'
 
-            reviewsRes = requests.get(reviewsLink)
-            reviewsRes.encoding = 'utf-8'
-            reviews_html = bs(reviewsRes.text, "html.parser")
+        try:
+            cust_comment = review.div.div.div.find_all('div', {"class": "t-ZTKy"})[0].div.div.text
+        except (TypeError, AttributeError) as e:
+            cust_comment = "No comment"
+            print("Exception while creating dictionary: ", e)
 
-            reviewList = reviews_html.findAll("div", {"class": "_1AtVbE col-12-12"})
-            del reviewList[0:4]
-            del reviewList[10]
+        mydict = {"Product": search_string, "Name": name, "Rating": rating, "CommentHead": comment_head,
+                  "Comment": cust_comment}
 
-            for review in reviewList:
-                try:
-                    # name.encode(encoding='utf-8')
-                    name = review.div.div.div.find_all('div', {"class":"row _3n8db9"})[0].div.p.text
-                    print(name)
-                except:
-                    name = 'No Name'
+        reviews.append(mydict)
 
-                try:
-                    # rating.encode(encoding='utf-8')
-                    rating = review.div.div.div.div.div.text
+    return reviews
 
 
-                except:
-                    rating = 'No Rating'
+@app.route('/products', methods=['GET'])
+@cross_origin()  # It allows requests comes from different machine all over the world. cloud block those requests.
+def get_products_list():
+    try:
+        html_parser = "html.parser"
+        search_string = request.args.get('input')
+        if search_string is None:
+            return "Query Parameter 'Input' is Required", 400
 
-                try:
-                    # commentHead.encode(encoding='utf-8')
-                    commentHead = review.div.div.div.div.p.text
+        page = request.args.get('page')
+        order_by = request.args.get('order_by')
+        if page is None:
+            page = '1'
 
-                except:
-                    commentHead = 'No Comment Heading'
+        name = request.args.get('name')
+        rating = request.args.get('rating')
+        comment_head = request.args.get('comment_head')
+        comment = request.args.get('comment')
 
-                try:
-                    custComment = review.div.div.div.find_all('div', {"class":"t-ZTKy"})[0].div.div.text
+        print(search_string)
+        flipkart_url = "https://www.flipkart.com/search?q=" + search_string
+        u_client = uReq(flipkart_url)
+        flipkart_page = u_client.read()
+        u_client.close()
+        flipkart_html = bs(flipkart_page, html_parser)
+        big_boxes = flipkart_html.findAll("div", {"class": "_1AtVbE col-12-12"})
+        del big_boxes[0:3]
+        box = big_boxes[0]
+        product_link = "https://www.flipkart.com" + box.div.div.div.a['href']
+        print("productLink", product_link)
+        prod_res = requests.get(product_link)
+        prod_res.encoding = 'utf-8'
+        prod_html = bs(prod_res.text, html_parser)
+        # print(prod_html)
 
-                except Exception as e:
-                    custComment = "No comment"
+        page_count = prod_html.findAll("div", {"class": "_3UAT2v _16PBlm"})[0].span.text.split(" ")[1]
+        total_pages = int(int(page_count) / 10) + 1
 
-                    print("Exception while creating dictionary: ", e)
+        if int(page) > total_pages or int(page) < 1:
+            print("page does not exists")
+            return "page does not exists", 400
 
-                mydict = {"Product": searchString, "Name": name, "Rating": rating, "CommentHead": commentHead,
-                          "Comment": custComment}
+        review_page = prod_html.findAll("div", {"class": "col JOpGWq"})
 
-                reviews.append(mydict)
-            return render_template('results.html', reviews=reviews[0:(len(reviews) - 1)])
-        except Exception as e:
-            print(e)
-            return 'something is wrong'
-    # return render_template('results.html')
-    else:
-        return render_template('index.html')
+        reviews = []
+
+        base_reviews_link = "https://www.flipkart.com" + review_page[0].a['href'].split("&")[0]
+
+        while len(reviews) < 20:
+            reviews_link = base_reviews_link + "&page=" + page
+
+            each_page = get_reviews_by_page(reviews_link, html_parser, search_string)
+
+            each_page_filtered = [record for record in each_page if
+                                  condition(record, name, rating, comment_head, comment)]
+
+            reviews = reviews + each_page_filtered
+
+            page = str(int(page) + 1)
+
+        # reviews = [record for record in reviews if condition(record, name, rating, comment_head, comment)]
+
+        if order_by is not None:
+            if order_by not in ("Product", "Name", "Rating", "CommentHead", "Comment"):
+                return "Invalid order by parameter", 400
+            reviews.sort(key=lambda x: x.get(order_by))
+
+        return jsonify(reviews, {"current": page}, {"total_pages": total_pages}, {"result_count": len(reviews)}), 200
+
+    except Exception as e:
+        print(e)
+        return 'something is wrong', 400
+
+
+def condition(d, name, rating, comment_head, comment):
+    if name is not None and name not in d.get('Name'):
+        return False
+
+    if rating is not None and rating not in d.get('Rating'):
+        return False
+
+    if comment_head is not None and comment_head not in d.get('CommentHead'):
+        return False
+
+    if comment is not None and comment not in d.get('Comment'):
+        return False
+
+    return True
 
 
 if __name__ == "__main__":
