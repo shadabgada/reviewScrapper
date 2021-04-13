@@ -105,7 +105,7 @@ def get_products_list():
 
         base_reviews_link = "https://www.flipkart.com" + review_page[0].a['href'].split("&")[0]
 
-        while len(reviews) < 20:
+        while len(reviews) < 10:
             reviews_link = base_reviews_link + "&page=" + page
 
             each_page = get_reviews_by_page(reviews_link, html_parser, search_string)
@@ -148,4 +148,4 @@ def condition(d, name, rating, comment_head, comment):
 
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    app.run()
